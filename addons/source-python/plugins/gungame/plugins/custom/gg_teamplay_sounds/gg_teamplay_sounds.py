@@ -5,12 +5,10 @@
 # =============================================================================
 # >> IMPORTS
 # =============================================================================
-# Python
-from operator import attrgetter
-
 # Source.Python
 from events import Event
 from events.hooks import EventAction, PreEvent
+from listeners.tick import Delay
 from players.teams import teams_by_number
 
 # GunGame
@@ -31,6 +29,9 @@ from .configuration import announce_final_round, dominating_levels, join_team
 @Event('round_start')
 def _round_start(game_event):
     """Play the "final round" sound, if it's the final round."""
+    if 'gg_teamplay' not in gg_plugin_manager:
+        return
+
     if not announce_final_round.get_bool():
         return
 
@@ -42,17 +43,24 @@ def _round_start(game_event):
     if list(levels)[0] != max_level:
         return
 
-    if 'gg_teamplay' not in gg_plugin_manager:
+    # pylint: disable=import-outside-toplevel
+    from gungame.plugins.included.gg_teamplay.manager import teamplay_manager
+    if teamplay_manager.current_module == 'deathmatch':
         return
 
+    # pylint: disable=import-outside-toplevel
     from gungame.plugins.included.gg_teamplay.manager import team_dictionary
-    if all([
-        i[0] == i[1] + 1 for i in map(
-            attrgetter('level_multi_kill', 'multi_kill'),
-            team_dictionary.values()
+    instances = team_dictionary.values()
+    current_multi_kills = {team.multi_kill for team in instances}
+    if len(current_multi_kills) != 1:
+        return
+
+    if list(current_multi_kills)[0] + 1 == list(instances)[0].level_multi_kill:
+        Delay(
+            delay=1,
+            callback=sound_manager.play_sound,
+            args=('teamplay_final_round',)
         )
-    ]):
-        sound_manager.play_sound('teamplay_final_round')
 
 
 @Event('player_team')
@@ -66,7 +74,11 @@ def _join_team(game_event):
         return
 
     player = player_dictionary[game_event['userid']]
-    player.play_sound(f'teamplay_join_team_{teams_by_number[team]}')
+    Delay(
+        delay=1,
+        callback=player.play_gg_sound,
+        args=(f'teamplay_join_team_{teams_by_number[team]}',)
+    )
 
 
 # =============================================================================
@@ -92,7 +104,11 @@ def _team_level_up(game_event):
         sound = 'increases_lead'
     else:
         sound = 'dominating'
-    sound_manager.play_sound(f'teamplay_{sound}_{suffix}')
+    Delay(
+        delay=1,
+        callback=sound_manager.play_sound,
+        args=(f'teamplay_{sound}_{suffix}',)
+    )
 
 
 # =============================================================================
@@ -112,3 +128,5 @@ def _stop_broadcast(game_event):
     """Stop round_end from broadcasting to clients causing round end sounds."""
     if game_event['reason'] != 15:
         return EventAction.STOP_BROADCAST
+
+    return EventAction.CONTINUE
